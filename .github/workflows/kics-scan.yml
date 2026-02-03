@@ -1,0 +1,161 @@
+name: KICS Security Scan
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - '**.tf'
+      - '**.tfvars'
+      - '.github/workflows/kics-scan.yml'
+
+  # Allow manual triggering
+  workflow_dispatch:
+
+# Prevent auto-merge - require manual review
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  kics-scan:
+    name: KICS Infrastructure Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run KICS Scan
+        uses: checkmarx/kics-github-action@v2.1.0
+        with:
+          # Scan current directory
+          path: '.'
+
+          # Exclude .terraform directories
+          exclude_paths: '.terraform/**,.git/**'
+
+          # Output formats
+          output_formats: 'json,sarif,html'
+          output_path: kics-results/
+
+          # Fail on HIGH and CRITICAL severity findings
+          fail_on: high,critical
+
+          # Include all query types
+          type: terraform
+
+          # Enable colored output
+          enable_comments: true
+
+      - name: Upload KICS Results (JSON)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kics-results-json
+          path: kics-results/results.json
+          retention-days: 30
+
+      - name: Upload KICS Results (HTML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kics-results-html
+          path: kics-results/results.html
+          retention-days: 30
+
+      - name: Upload KICS Results (SARIF)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kics-results-sarif
+          path: kics-results/results.sarif
+          retention-days: 30
+
+      - name: Upload to GitHub Security Tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: kics-results/results.sarif
+          category: kics
+
+      - name: Parse KICS Results
+        if: always()
+        id: kics-results
+        run: |
+          if [ -f "kics-results/results.json" ]; then
+            TOTAL=$(jq '.total_counter' kics-results/results.json)
+            CRITICAL=$(jq '.severity_counters.CRITICAL // 0' kics-results/results.json)
+            HIGH=$(jq '.severity_counters.HIGH // 0' kics-results/results.json)
+            MEDIUM=$(jq '.severity_counters.MEDIUM // 0' kics-results/results.json)
+            LOW=$(jq '.severity_counters.LOW // 0' kics-results/results.json)
+            INFO=$(jq '.severity_counters.INFO // 0' kics-results/results.json)
+
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+            echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+            echo "high=$HIGH" >> $GITHUB_OUTPUT
+            echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+            echo "low=$LOW" >> $GITHUB_OUTPUT
+            echo "info=$INFO" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment PR with Results
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const critical = '${{ steps.kics-results.outputs.critical }}';
+            const high = '${{ steps.kics-results.outputs.high }}';
+            const medium = '${{ steps.kics-results.outputs.medium }}';
+            const low = '${{ steps.kics-results.outputs.low }}';
+            const info = '${{ steps.kics-results.outputs.info }}';
+            const total = '${{ steps.kics-results.outputs.total }}';
+
+            const body = `## 🔒 KICS Security Scan Results
+
+            | Severity | Count |
+            |----------|-------|
+            | 🔴 Critical | ${critical || 0} |
+            | 🟠 High | ${high || 0} |
+            | 🟡 Medium | ${medium || 0} |
+            | 🟢 Low | ${low || 0} |
+            | ℹ️ Info | ${info || 0} |
+            | **Total** | **${total || 0}** |
+
+            ### 📋 Review Instructions
+            1. Download the detailed HTML report from the workflow artifacts
+            2. Review all CRITICAL and HIGH severity findings
+            3. Fix misconfigurations in your Terraform code
+            4. Re-run the workflow to verify fixes
+            5. Only merge after all critical issues are resolved
+
+            ### 📥 Artifacts
+            - **HTML Report**: Detailed findings with remediation guidance
+            - **JSON Report**: Machine-readable results
+            - **SARIF Report**: Available in the Security tab
+
+            ${critical > 0 || high > 0 ? '⚠️ **Action Required**: This PR has CRITICAL or HIGH severity findings that must be addressed before merging.' : '✅ No critical or high severity issues found!'}
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.name,
+              body: body
+            });
+
+      - name: Set Status Check
+        if: always()
+        run: |
+          CRITICAL=${{ steps.kics-results.outputs.critical }}
+          HIGH=${{ steps.kics-results.outputs.high }}
+
+          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+            echo "❌ KICS scan found CRITICAL or HIGH severity issues"
+            echo "Please review the artifacts and fix the issues before merging"
+            exit 1
+          else
+            echo "✅ KICS scan passed - no critical or high severity issues found"
+          fi
