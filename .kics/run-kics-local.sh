@@ -7,7 +7,7 @@ set -e
 echo "🔒 Running KICS Security Scan Locally..."
 echo ""
 
-# Create results directory
+# Create results directory test
 mkdir -p kics-results
 
 # Check if KICS is installed natively
