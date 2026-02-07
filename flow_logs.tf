@@ -126,7 +126,7 @@ resource "aws_s3_bucket" "flow_logs" {
   count = var.enable_flow_logs ? 1 : 0
 
   bucket_prefix = "${var.project_name}-flow-logs-"
-  force_destroy = true  # Allow Terraform to delete bucket even if it contains objects
+  force_destroy = true # Allow Terraform to delete bucket even if it contains objects
 
   tags = {
     Name = "${var.project_name}-flow-logs-${var.environment}"
@@ -249,7 +249,7 @@ resource "aws_iam_role_policy" "flow_logs" {
           "logs:DescribeLogGroups",
           "logs:DescribeLogStreams"
         ]
-        Effect = "Allow"
+        Effect   = "Allow"
         Resource = "${aws_cloudwatch_log_group.flow_logs[0].arn}:*"
       }
     ]
