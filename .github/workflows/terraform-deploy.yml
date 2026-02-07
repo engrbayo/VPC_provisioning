@@ -28,7 +28,8 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write
-  id-token: write  # For OIDC authentication with AWS
+  # kics-scan ignore-line
+  id-token: write  # Required for OIDC authentication with AWS
 
 env:
   AWS_REGION: us-east-1
